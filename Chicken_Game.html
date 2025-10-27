@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chicken Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #90EE90;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: 'Arial', sans-serif;
+            color: #333;
+        }
+        canvas {
+            border: 3px solid #8B4513;
+            background-color: #228B22;
+            box-shadow: 0 0 15px rgba(0,0,0,0.3);
+        }
+        canvas:fullscreen {
+            width: 100vw;
+            height: 100vh;
+        }
+        #gameInfo {
+            margin-top: 20px;
+            text-align: center;
+        }
+        #controls {
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        button {
+            margin-top: 15px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #FF6347;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            display: none;
+        }
+        button:hover {
+            background-color: #FF4500;
+        }
+        #fullscreenBtn {
+            display: inline-block;
+            margin-left: 10px;
+        }
+        #stageDisplay {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🐔 Chicken Game 🐔</h1>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="gameInfo">
+        <div id="stageDisplay">Stage: 1</div>
+        <div id="scoreDisplay">Eggs Collected: 0 / 5</div>
+        <div id="controls">
+            <strong>Controls:</strong><br>
+            Move: Arrow Keys or WASD<br>
+            Shoot: Spacebar (when available)
+        </div>
+        <button id="restartBtn">Re-do Game</button>
+        <button id="fullscreenBtn">Fullscreen</button>
+    </div>
+
+    <script>
+        // Game constants
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const restartBtn = document.getElementById('restartBtn');
+        const stageDisplay = document.getElementById('stageDisplay');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+
+        const WIDTH = canvas.width;
+        const HEIGHT = canvas.height;
+
+        const CHICKEN_SPEED = 3;
+        const FOX_SPEED = 1.5;
+        const BULLET_SPEED = 5;
+        const EGG_COUNT = 5;
+
+        const GAME_STATES = {
+            PLAYING: 'playing',
+            WIN: 'win',
+            LOSE: 'lose'
+        };
+
+        // Utility class
+        class Vector2 {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+            }
+            add(v) {
+                this.x += v.x;
+                this.y += v.y;
+            }
+            distance(v) {
+                return Math.sqrt((this.x - v.x) ** 2 + (this.y - v.y) ** 2);
+            }
+        }
+
+        function checkCollision(a, b) {
+            return a.x < b.x + b.width &&
+                   a.x + a.width > b.x &&
+                   a.y < b.y + b.height &&
+                   a.y + a.height > b.y;
+        }
+
+        // Chicken (Player) class
+        class Chicken {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 30;
+                this.height = 30;
+                this.eggsCarried = 0;
+                this.shootCooldown = 0;
+            }
+
+            update(keys) {
+                // Movement
+                if (keys.left && this.x > 0) this.x -= CHICKEN_SPEED;
+                if (keys.right && this.x < WIDTH - this.width) this.x += CHICKEN_SPEED;
+                if (keys.up && this.y > 0) this.y -= CHICKEN_SPEED;
+                if (keys.down && this.y < HEIGHT - this.height) this.y += CHICKEN_SPEED;
+
+                // Shooting cooldown
+                if (this.shootCooldown > 0) this.shootCooldown--;
+            }
+
+            draw(ctx) {
+                // Chicken body (yellow with white belly)
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.ellipse(this.x + this.width/2, this.y + this.height/2 + 5, this.width/2, this.height/2 - 2, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // White belly
+                ctx.fillStyle = '#FFFFFF';
+                ctx.beginPath();
+                ctx.ellipse(this.x + this.width/2, this.y + this.height/2 + 8, this.width/2 - 5, this.height/2 - 5, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Head (yellow)
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(this.x + this.width/2, this.y + 8, 12, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Beak (orange)
+                ctx.fillStyle = '#FFA500';
+                ctx.beginPath();
+                ctx.moveTo(this.x + this.width, this.y + 8);
+                ctx.lineTo(this.x + this.width + 6, this.y + 6);
+                ctx.lineTo(this.x + this.width + 6, this.y + 10);
+                ctx.closePath();
+                ctx.fill();
+
+                // Eyes (black with white highlight)
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(this.x + 18, this.y + 5, 2.5, 0, Math.PI * 2);
+                ctx.arc(this.x + 25, this.y + 5, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(this.x + 19, this.y + 4, 1, 0, Math.PI * 2);
+                ctx.arc(this.x + 26, this.y + 4, 1, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Comb (red)
+                ctx.fillStyle = '#FF0000';
+                ctx.beginPath();
+                ctx.moveTo(this.x + 15, this.y - 2);
+                ctx.lineTo(this.x + 17, this.y - 6);
+                ctx.lineTo(this.x + 19, this.y - 2);
+                ctx.lineTo(this.x + 21, this.y - 8);
+                ctx.lineTo(this.x + 23, this.y - 2);
+                ctx.closePath();
+                ctx.fill();
+
+                // Legs (yellow)
+                ctx.strokeStyle = '#FFD700';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(this.x + 12, this.y + this.height);
+                ctx.lineTo(this.x + 10, this.y + this.height + 8);
+                ctx.moveTo(this.x + 18, this.y + this.height);
+                ctx.lineTo(this.x + 20, this.y + this.height + 8);
+                ctx.stroke();
+
+                // Feet (orange)
+                ctx.fillStyle = '#FFA500';
+                // Left foot
+                ctx.beginPath();
+                ctx.moveTo(this.x + 8, this.y + this.height + 8);
+                ctx.lineTo(this.x + 5, this.y + this.height + 12);
+                ctx.lineTo(this.x + 12, this.y + this.height + 12);
+                ctx.closePath();
+                ctx.fill();
+                // Right foot
+                ctx.beginPath();
+                ctx.moveTo(this.x + 22, this.y + this.height + 8);
+                ctx.lineTo(this.x + 19, this.y + this.height + 12);
+                ctx.lineTo(this.x + 26, this.y + this.height + 12);
+                ctx.closePath();
+                ctx.fill();
+
+                // Wings (subtle)
+                ctx.fillStyle = '#FFA500';
+                ctx.beginPath();
+                ctx.ellipse(this.x + 8, this.y + 15, 4, 6, Math.PI/4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Show eggs carried
+                if (this.eggsCarried > 0) {
+                    ctx.fillStyle = 'white';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.fillText(this.eggsCarried.toString(), this.x + this.width/2 - 4, this.y - 8);
+                }
+            }
+
+            shoot() {
+                if (this.shootCooldown <= 0) {
+                    const bullet = new Bullet(this.x + this.width/2, this.y + this.height/2, 0, -1);
+                    this.shootCooldown = 20;
+                    return bullet;
+                }
+                return null;
+            }
+        }
+
+        // Fox (Enemy) class
+        class Fox {
+            constructor(x, y, canShoot = false) {
+                this.x = x;
+                this.y = y;
+                this.width = 35;
+                this.height = 25;
+                this.velX = FOX_SPEED * (Math.random() > 0.5 ? 1 : -1);
+                this.velY = FOX_SPEED * (Math.random() > 0.5 ? 1 : -1);
+                this.canShoot = canShoot;
+                this.shootCooldown = canShoot ? 60 : 0;
+                this.health = canShoot ? 2 : 1; // Angry foxes have 2 health
+                this.isAngry = canShoot; // Stage 3 foxes are angry
+            }
+
+            update(chicken) {
+                // Move towards chicken more aggressively if angry
+                const moveChance = this.isAngry ? 0.05 : 0.02; // Angry foxes move towards chicken more often
+                if (Math.random() < moveChance) {
+                    if (this.x < chicken.x) this.velX = (this.isAngry ? FOX_SPEED * 1.5 : FOX_SPEED);
+                    else this.velX = (this.isAngry ? -FOX_SPEED * 1.5 : -FOX_SPEED);
+                    if (this.y < chicken.y) this.velY = (this.isAngry ? FOX_SPEED * 1.5 : FOX_SPEED);
+                    else this.velY = (this.isAngry ? -FOX_SPEED * 1.5 : -FOX_SPEED);
+                }
+
+                this.x += this.velX;
+                this.y += this.velY;
+
+                // Bounce off walls
+                if (this.x <= 0 || this.x >= WIDTH - this.width) this.velX *= -1;
+                if (this.y <= 0 || this.y >= HEIGHT - this.height) this.velY *= -1;
+
+                // Shooting (angry foxes shoot more frequently)
+                if (this.canShoot && this.shootCooldown <= 0) {
+                    this.shootCooldown = this.isAngry ? 40 : 60; // Angry foxes shoot more often
+                    const dx = chicken.x - this.x;
+                    const dy = chicken.y - this.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    return new EnemyBullet(this.x + this.width/2, this.y + this.height/2,
+                                         dx/dist, dy/dist);
+                }
+
+                return null;
+            }
+
+            draw(ctx) {
+                // Fox body (orange and white)
+                ctx.fillStyle = this.isAngry ? '#FFA500' : '#FF6347'; // Angry foxes are brighter orange
+                ctx.fillRect(this.x, this.y + 10, this.width, this.height - 10);
+
+                // Fox head (white)
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(this.x + this.width/2, this.y + 10, 12, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Ears (orange)
+                ctx.fillStyle = '#FFA500';
+                ctx.beginPath();
+                ctx.moveTo(this.x + 10, this.y);
+                ctx.lineTo(this.x + 8, this.y - 8);
+                ctx.lineTo(this.x + 12, this.y - 8);
+                ctx.closePath();
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(this.x + 25, this.y);
+                ctx.lineTo(this.x + 23, this.y - 8);
+                ctx.lineTo(this.x + 27, this.y - 8);
+                ctx.closePath();
+                ctx.fill();
+
+                // Eyes (angry foxes have red eyes)
+                ctx.fillStyle = this.isAngry ? '#FF0000' : 'black';
+                ctx.beginPath();
+                ctx.arc(this.x + 8, this.y + 8, 3, 0, Math.PI * 2);
+                ctx.arc(this.x + 17, this.y + 8, 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Tail (orange and white)
+                ctx.fillStyle = this.isAngry ? '#FFA500' : '#FF6347';
+                ctx.beginPath();
+                ctx.arc(this.x - 5, this.y + 20, 8, 0, Math.PI * 2);
+                ctx.fill();
+                // White tip on tail
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(this.x - 5, this.y + 18, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Egg class
+        class Egg {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 15;
+                this.height = 20;
+                this.collected = false;
+            }
+
+            draw(ctx) {
+                if (!this.collected) {
+                    ctx.fillStyle = 'white';
+                    ctx.beginPath();
+                    ctx.ellipse(this.x + this.width/2, this.y + this.height/2, this.width/2, this.height/2, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#F0F8FF';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // House class
+        class House {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 80;
+                this.height = 70;
+            }
+
+            draw(ctx) {
+                // House base (red with white trim)
+                ctx.fillStyle = '#FF0000';
+                ctx.fillRect(this.x, this.y + 25, this.width, this.height - 25);
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(this.x, this.y + 25, this.width, this.height - 25);
+
+                // Roof (brown with shingles)
+                ctx.fillStyle = '#8B4513';
+                ctx.beginPath();
+                ctx.moveTo(this.x - 5, this.y + 25);
+                ctx.lineTo(this.x + this.width/2, this.y);
+                ctx.lineTo(this.x + this.width + 5, this.y + 25);
+                ctx.closePath();
+                ctx.fill();
+                // Shingles
+                ctx.strokeStyle = '#654321';
+                ctx.lineWidth = 1;
+                for (let i = 0; i < 8; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(this.x - 5 + i * 10, this.y + 25);
+                    ctx.lineTo(this.x + this.width/2, this.y + i * 3);
+                    ctx.stroke();
+                }
+
+                // Door (brown with knob)
+                ctx.fillStyle = '#654321';
+                ctx.fillRect(this.x + 25, this.y + 40, 30, 30);
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(this.x + 32, this.y + 55, 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Windows (light blue with cross)
+                ctx.fillStyle = '#87CEEB';
+                ctx.fillRect(this.x + 8, this.y + 32, 15, 15);
+                ctx.fillRect(this.x + 57, this.y + 32, 15, 15);
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 1;
+                // Crosses
+                ctx.beginPath();
+                ctx.moveTo(this.x + 15.5, this.y + 32);
+                ctx.lineTo(this.x + 15.5, this.y + 47);
+                ctx.moveTo(this.x + 8, this.y + 39.5);
+                ctx.lineTo(this.x + 23, this.y + 39.5);
+                ctx.moveTo(this.x + 64.5, this.y + 32);
+                ctx.lineTo(this.x + 64.5, this.y + 47);
+                ctx.moveTo(this.x + 57, this.y + 39.5);
+                ctx.lineTo(this.x + 72, this.y + 39.5);
+                ctx.stroke();
+
+                // Chimney
+                ctx.fillStyle = '#696969';
+                ctx.fillRect(this.x + 50, this.y - 15, 8, 20);
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(this.x + 50, this.y - 15, 8, 20);
+            }
+        }
+
+        // Tree class
+        class Tree {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 40;
+                this.height = 60;
+            }
+
+            draw(ctx) {
+                // Tree trunk
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(this.x + 15, this.y + 40, 10, 20);
+
+                // Tree foliage (green)
+                ctx.fillStyle = '#228B22';
+                ctx.beginPath();
+                ctx.arc(this.x + 20, this.y + 30, 18, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.x + 15, this.y + 25, 15, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.x + 25, this.y + 25, 15, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Flower class
+        class Flower {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 20;
+                this.height = 25;
+            }
+
+            draw(ctx) {
+                // Stem
+                ctx.strokeStyle = '#228B22';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(this.x + 10, this.y + 20);
+                ctx.lineTo(this.x + 10, this.y + 5);
+                ctx.stroke();
+
+                // Flower petals (pink)
+                ctx.fillStyle = '#FF69B4';
+                ctx.beginPath();
+                ctx.arc(this.x + 10, this.y + 5, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.x + 5, this.y + 8, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.x + 15, this.y + 8, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.x + 10, this.y + 11, 6, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Center (yellow)
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(this.x + 10, this.y + 8, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Bullet classes
+        class Bullet {
+            constructor(x, y, dirX, dirY) {
+                this.x = x;
+                this.y = y;
+                this.width = 6;
+                this.height = 6;
+                this.velX = dirX * BULLET_SPEED;
+                this.velY = dirY * BULLET_SPEED;
+            }
+
+            update() {
+                this.x += this.velX;
+                this.y += this.velY;
+            }
+
+            draw(ctx) {
+                ctx.fillStyle = '#FF0000';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+        }
+
+        class EnemyBullet extends Bullet {
+            draw(ctx) {
+                ctx.fillStyle = '#FF0000';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+        }
+
+        // Game class
+        class Game {
+            constructor() {
+                this.state = GAME_STATES.PLAYING;
+                this.stage = 0;
+                this.chicken = new Chicken(50, HEIGHT - 80);
+                this.house = new House(WIDTH - 80, HEIGHT - 80);
+                this.eggs = [];
+                this.foxes = [];
+                this.trees = [];
+                this.flowers = [];
+                this.bullets = [];
+                this.enemyBullets = [];
+                this.loadStage();
+            }
+
+            loadStage() {
+                this.eggs = [];
+                this.foxes = [];
+                this.trees = [];
+                this.flowers = [];
+                this.bullets = [];
+                this.enemyBullets = [];
+
+                // Generate trees
+                for (let i = 0; i < 3; i++) {
+                    let x, y;
+                    do {
+                        x = Math.random() * (WIDTH - 100) + 50;
+                        y = Math.random() * (HEIGHT - 200) + 100;
+                    } while (x > this.house.x - 60 && x < this.house.x + this.house.width + 60 &&
+                             y > this.house.y - 60 && y < this.house.y + this.house.height + 60);
+                    this.trees.push(new Tree(x, y));
+                }
+
+                // Generate flowers
+                for (let i = 0; i < 5; i++) {
+                    let x, y;
+                    do {
+                        x = Math.random() * (WIDTH - 100) + 50;
+                        y = Math.random() * (HEIGHT - 200) + 100;
+                    } while (x > this.house.x - 40 && x < this.house.x + this.house.width + 40 &&
+                             y > this.house.y - 40 && y < this.house.y + this.house.height + 40);
+                    this.flowers.push(new Flower(x, y));
+                }
+
+                // Generate eggs
+                for (let i = 0; i < EGG_COUNT; i++) {
+                    let x, y;
+                    do {
+                        x = Math.random() * (WIDTH - 100) + 50;
+                        y = Math.random() * (HEIGHT - 150) + 50;
+                    } while (x > this.house.x - 50 && x < this.house.x + this.house.width + 50 &&
+                             y > this.house.y - 50 && y < this.house.y + this.house.height + 50);
+                    this.eggs.push(new Egg(x, y));
+                }
+
+                // Generate foxes based on stage
+                const foxCount = [2, 4, 6][this.stage];
+                const canShoot = this.stage === 2;
+                for (let i = 0; i < foxCount; i++) {
+                    const x = Math.random() * (WIDTH - 100) + 50;
+                    const y = Math.random() * (HEIGHT - 150) + 50;
+                    this.foxes.push(new Fox(x, y, canShoot));
+                }
+
+                stageDisplay.textContent = `Stage: ${this.stage + 1}`;
+                scoreDisplay.textContent = `Eggs Collected: ${this.chicken.eggsCarried} / ${EGG_COUNT}`;
+            }
+
+            update(keys) {
+                if (this.state !== GAME_STATES.PLAYING) return;
+
+                this.chicken.update(keys);
+
+                // Shooting
+                if (keys.space && this.stage >= 1) {
+                    const bullet = this.chicken.shoot();
+                    if (bullet) this.bullets.push(bullet);
+                }
+
+                // Update foxes
+                this.foxes.forEach(fox => {
+                    const bullet = fox.update(this.chicken);
+                    if (bullet) this.enemyBullets.push(bullet);
+                });
+
+                // Update bullets
+                this.bullets = this.bullets.filter(bullet => {
+                    bullet.update();
+                    return bullet.x > 0 && bullet.x < WIDTH && bullet.y > 0 && bullet.y < HEIGHT;
+                });
+
+                this.enemyBullets = this.enemyBullets.filter(bullet => {
+                    bullet.update();
+                    return bullet.x > 0 && bullet.x < WIDTH && bullet.y > 0 && bullet.y < HEIGHT;
+                });
+
+                // Collision: Chicken vs Eggs
+                this.eggs.forEach(egg => {
+                    if (!egg.collected && checkCollision(this.chicken, egg)) {
+                        egg.collected = true;
+                        this.chicken.eggsCarried++;
+                        scoreDisplay.textContent = `Eggs Collected: ${this.chicken.eggsCarried} / ${EGG_COUNT}`;
+                    }
+                });
+
+                // Collision: Chicken vs House
+                if (checkCollision(this.chicken, this.house) && this.chicken.eggsCarried === EGG_COUNT) {
+                    if (this.stage < 2) {
+                        this.stage++;
+                        this.chicken.eggsCarried = 0;
+                        this.loadStage();
+                    } else {
+                        this.state = GAME_STATES.WIN;
+                        restartBtn.style.display = 'block';
+                    }
+                }
+
+                // Collision: Bullets vs Foxes
+                this.bullets.forEach((bullet, bIndex) => {
+                    this.foxes.forEach((fox, fIndex) => {
+                        if (checkCollision(bullet, fox)) {
+                            this.bullets.splice(bIndex, 1);
+                            fox.health--;
+                            if (fox.health <= 0) {
+                                this.foxes.splice(fIndex, 1);
+                            }
+                        }
+                    });
+                });
+
+                // Collision: Chicken vs Foxes
+                this.foxes.forEach(fox => {
+                    if (checkCollision(this.chicken, fox)) {
+                        this.state = GAME_STATES.LOSE;
+                        restartBtn.style.display = 'block';
+                    }
+                });
+
+                // Collision: Enemy bullets vs Chicken
+                this.enemyBullets.forEach(bullet => {
+                    if (checkCollision(bullet, this.chicken)) {
+                        this.state = GAME_STATES.LOSE;
+                        restartBtn.style.display = 'block';
+                    }
+                });
+            }
+
+            draw() {
+                ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+                // Draw background
+                ctx.fillStyle = '#90EE90';
+                ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+                // Draw trees
+                this.trees.forEach(tree => tree.draw(ctx));
+
+                // Draw flowers
+                this.flowers.forEach(flower => flower.draw(ctx));
+
+                // Draw house
+                this.house.draw(ctx);
+
+                // Draw eggs
+                this.eggs.forEach(egg => egg.draw(ctx));
+
+                // Draw chicken
+                this.chicken.draw(ctx);
+
+                // Draw foxes
+                this.foxes.forEach(fox => fox.draw(ctx));
+
+                // Draw bullets
+                this.bullets.forEach(bullet => bullet.draw(ctx));
+                this.enemyBullets.forEach(bullet => bullet.draw(ctx));
+
+                // Win/Lose screens
+                if (this.state === GAME_STATES.WIN) {
+                    this.drawWinScreen();
+                } else if (this.state === GAME_STATES.LOSE) {
+                    this.drawLoseScreen();
+                }
+            }
+
+            drawWinScreen() {
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+                ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                ctx.fillStyle = 'white';
+                ctx.font = '48px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('🎉 You Won! 🎉', WIDTH/2, HEIGHT/2);
+                ctx.font = '24px Arial';
+                ctx.fillText('All eggs safely home!', WIDTH/2, HEIGHT/2 + 50);
+                ctx.textAlign = 'left';
+            }
+
+            drawLoseScreen() {
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                ctx.fillStyle = 'white';
+                ctx.font = '48px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('😵 Game Over 😵', WIDTH/2, HEIGHT/2);
+                ctx.font = '24px Arial';
+                ctx.fillText('The fox got you!', WIDTH/2, HEIGHT/2 + 50);
+                ctx.textAlign = 'left';
+            }
+        }
+
+        // Input handling
+        const keys = {
+            left: false,
+            right: false,
+            up: false,
+            down: false,
+            space: false
+        };
+
+        window.addEventListener('keydown', (e) => {
+            switch (e.code) {
+                case 'KeyA':
+                case 'ArrowLeft':
+                    keys.left = true;
+                    break;
+                case 'KeyD':
+                case 'ArrowRight':
+                    keys.right = true;
+                    break;
+                case 'KeyW':
+                case 'ArrowUp':
+                    keys.up = true;
+                    break;
+                case 'KeyS':
+                case 'ArrowDown':
+                    keys.down = true;
+                    break;
+                case 'Space':
+                    keys.space = true;
+                    e.preventDefault();
+                    break;
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            switch (e.code) {
+                case 'KeyA':
+                case 'ArrowLeft':
+                    keys.left = false;
+                    break;
+                case 'KeyD':
+                case 'ArrowRight':
+                    keys.right = false;
+                    break;
+                case 'KeyW':
+                case 'ArrowUp':
+                    keys.up = false;
+                    break;
+                case 'KeyS':
+                case 'ArrowDown':
+                    keys.down = false;
+                    break;
+                case 'Space':
+                    keys.space = false;
+                    break;
+            }
+        });
+
+        // Game loop
+        const game = new Game();
+        let lastTime = 0;
+
+        function gameLoop(timestamp) {
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+
+            game.update(keys);
+            game.draw();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        requestAnimationFrame(gameLoop);
+
+        // Restart functionality
+        restartBtn.addEventListener('click', () => {
+            game.stage = 0;
+            game.chicken = new Chicken(50, HEIGHT - 80);
+            game.state = GAME_STATES.PLAYING;
+            game.loadStage();
+            restartBtn.style.display = 'none';
+        });
+
+        // Fullscreen functionality
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                canvas.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable fullscreen: ${err.message}`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        });
+
+        // Update fullscreen button text
+        document.addEventListener('fullscreenchange', () => {
+            if (document.fullscreenElement) {
+                fullscreenBtn.textContent = 'Exit Fullscreen';
+            } else {
+                fullscreenBtn.textContent = 'Fullscreen';
+            }
+        });
+    </script>
+</body>
+</html>
